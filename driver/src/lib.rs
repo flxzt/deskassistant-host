@@ -1,30 +1,40 @@
 pub mod epdimage;
 pub mod pybindings;
 
+use std::time::Duration;
+
 // Re-Exports
 pub use epdimage::EpdImage;
 
-use anyhow::Context;
 use pyo3::prelude::*;
 
-pub const USB_DEVICE_VID: u16 = 1155;
-pub const USB_DEVICE_PID: u16 = 0x456;
+pub const USB_DEVICE_VID: u16 = 0x0483;
+pub const USB_DEVICE_PID: u16 = 0x0456;
 
-pub const USB_HID_REPORT_ID1_LEN: usize = 8 + 1;
-pub const USB_HID_REPORT_ID2_LEN: usize = 8 + 1;
-pub const USB_HID_REPORT_ID3_LEN: usize = 63 + 1;
+pub const USB_HOST_MSG_LEN: usize = 64;
+pub const USB_DEVICE_MSG_LEN: usize = 64;
+pub const USB_HOST_DATA_LEN: usize = 64;
+pub const USB_DEVICE_DATA_LEN: usize = 64;
 
 pub const EPD_WIDTH: u32 = 400;
 pub const EPD_HEIGHT: u32 = 300;
+
+const EPNUM_HOST_MSG: u8 = 0x01;
+const EPNUM_DEVICE_MSG: u8 = 0x82;
+const EPNUM_HOST_DATA: u8 = 0x03;
+const EPNUM_DEVICE_DATA: u8 = 0x84;
+
+const ITF_NUM_HOST: u8 = 0;
+const ITF_NUM_DEVICE: u8 = 1;
 
 #[derive(
     Debug, Clone, Copy, clap::ValueEnum, num_derive::FromPrimitive, num_derive::ToPrimitive,
 )]
 #[pyclass]
 pub enum EpdPage {
-    First = 0,
-    Second = 1,
-    Third = 2,
+    Overview = 0,
+    AppScreen = 1,
+    UserImage = 2,
 }
 
 impl TryFrom<EpdPage> for u8 {
@@ -45,80 +55,43 @@ impl TryFrom<u8> for EpdPage {
     }
 }
 
-type HidReport = Vec<u8>;
-
 #[derive(Debug, Clone)]
 pub enum HostMessage {
     RequestDeviceStatus,
     SwitchPage(EpdPage),
-    UpdateUserImage {
-        format: epdimage::EpdImageFormat,
-    },
+    UpdateUserImage { format: epdimage::EpdImageFormat },
     UpdateUserImageComplete,
     RefreshDisplay,
-    /// Data Transfer has Report ID 3
-    DataTransfer([u8; USB_HID_REPORT_ID3_LEN - 1]),
 }
 
 impl HostMessage {
-    pub fn into_hid_report(self) -> HidReport {
+    pub fn into_data(self) -> [u8; USB_HOST_MSG_LEN] {
+        let mut data: [u8; USB_HOST_MSG_LEN] = [0; USB_HOST_DATA_LEN];
+
         match self {
             HostMessage::RequestDeviceStatus => {
-                vec![
-                    0x02, // Report ID
-                    0x00, // Host message type
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]
+                data[0] = 0x00; // Host message variant
             }
             HostMessage::SwitchPage(page) => {
-                vec![
-                    0x02, // Report ID
-                    0x01, // Host message type
-                    page.try_into().unwrap(),
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                    0x00,
-                ]
+                data[0] = 0x01; // Host message variant
+                data[1] = page.try_into().unwrap();
             }
             HostMessage::UpdateUserImage { format } => {
-                vec![
-                    0x02, // Report ID
-                    0x02, // Host message type
-                    (format.width & 0xff) as u8,
-                    ((format.width >> 8) & 0xff) as u8,
-                    (format.height & 0xff) as u8,
-                    ((format.height >> 8) & 0xff) as u8,
-                    0x00,
-                    0x00,
-                    0x00,
-                ]
+                data[0] = 0x02; // Host message variant
+                data[1] = (format.width & 0xff) as u8;
+                data[2] = ((format.width >> 8) & 0xff) as u8;
+                data[3] = (format.height & 0xff) as u8;
+                data[4] = ((format.height >> 8) & 0xff) as u8;
             }
             HostMessage::UpdateUserImageComplete => {
-                vec![
-                    0x02, // Report ID
-                    0x03, // Host message type
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]
+                data[0] = 0x03; // Host message variant
             }
             HostMessage::RefreshDisplay => {
-                vec![
-                    0x02, // Report ID
-                    0x04, // Host message type
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]
-            }
-            HostMessage::DataTransfer(data) => {
-                let mut report = vec![
-                    0x03, // Report ID
-                ];
-                report.extend(data);
-
-                report
+                data[0] = 0x04; // Host message variant
             }
         }
+
+        data
     }
 }
 
@@ -128,20 +101,10 @@ pub enum DeviceMessage {
 }
 
 impl DeviceMessage {
-    /// Must include the report ID as first byte
-    pub fn from_hid_report_data(
-        data: &[u8; USB_HID_REPORT_ID1_LEN],
-    ) -> anyhow::Result<Self> {
-        if data[0] != 0x01 {
-            return Err(anyhow::anyhow!(
-                "Could not extract DeviceMessage from data, invalid report ID `{}`.",
-                data[0]
-            ));
-        }
-
-        match data[1] {
+    pub fn from_data(data: &[u8; USB_DEVICE_MSG_LEN]) -> anyhow::Result<Self> {
+        match data[0] {
             0x00 => Ok(Self::DeviceStatus(DeviceStatus {
-                current_epd_page: EpdPage::try_from(data[2])?,
+                current_epd_page: EpdPage::try_from(data[1])?,
             })),
             _ => Err(anyhow::anyhow!(
                 "Could not extract DeviceMessage from data, invalid message variant"
@@ -160,44 +123,86 @@ pub struct DeviceStatus {
 
 #[pyclass]
 pub struct UsbConnection {
-    #[allow(unused)]
-    api: hidapi::HidApi,
-    device: hidapi::HidDevice,
+    device_handle: Option<rusb::DeviceHandle<rusb::GlobalContext>>,
 }
 
 impl UsbConnection {
-    pub fn init() -> anyhow::Result<Self> {
+    pub fn new() -> Self {
+        Self {
+            device_handle: None,
+        }
+    }
+
+    pub fn open(&mut self) -> anyhow::Result<()> {
         let vid = USB_DEVICE_VID;
         let pid = USB_DEVICE_PID;
 
-        let api = hidapi::HidApi::new().context("creating hid api failed.")?;
-        let device = api.open(vid, pid).context(format!(
-            "open device with VID `{:#06x}`, PID `{:#06x}` failed.",
-            vid, pid
-        ))?;
-        device.set_blocking_mode(true)?;
+        if self.device_handle.is_some() {
+            // Already connected, early return
+            return Ok(())
+        }
 
-        Ok(Self { api, device })
-    }
+        let mut device_h = rusb::open_device_with_vid_pid(vid, pid).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Could not open device. Not found for VID `{}`, PID `{}",
+                vid,
+                pid
+            )
+        })?;
 
-    pub fn send_host_message(&self, msg: HostMessage) -> anyhow::Result<()> {
-        let report = msg.into_hid_report();
+        device_h.claim_interface(ITF_NUM_HOST)?;
+        device_h.claim_interface(ITF_NUM_DEVICE)?;
 
-        self.device.write(&report)?;
-        self.api.check_error()?;
+        self.device_handle = Some(device_h);
 
         Ok(())
     }
 
-    pub fn read_device_message(&self, timeout: u16) -> anyhow::Result<DeviceMessage> {
-        let mut data = [0_u8; USB_HID_REPORT_ID1_LEN];
+    pub fn send_host_message(&self, msg: HostMessage, timeout: Duration) -> anyhow::Result<()> {
+        let data = msg.into_data();
 
-        self.device.read_timeout(&mut data, timeout as i32)?;
-        log::debug!("USB: RECV DATA: {:?}", data);
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
 
-        self.api.check_error()?;
+        device_handle.write_bulk(EPNUM_HOST_MSG, &data, timeout)?;
+        Ok(())
+    }
 
-        DeviceMessage::from_hid_report_data(&data)
+    pub fn read_device_message(&self, timeout: Duration) -> anyhow::Result<DeviceMessage> {
+        let mut data = [0_u8; USB_HOST_MSG_LEN];
+
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
+
+        device_handle.read_bulk(EPNUM_DEVICE_MSG, &mut data, timeout)?;
+
+        DeviceMessage::from_data(&data)
+    }
+
+    pub fn transmit_host_data(&self, data: &[u8], timeout: Duration) -> anyhow::Result<()> {
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
+
+        device_handle.write_bulk(EPNUM_HOST_DATA, data, timeout)?;
+
+        Ok(())
+    }
+
+    pub fn receive_device_data(&self, buf: &mut [u8], timeout: Duration) -> anyhow::Result<()> {
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
+
+        device_handle.read_bulk(EPNUM_DEVICE_DATA, buf, timeout)?;
+
+        Ok(())
     }
 }
 

@@ -1,11 +1,9 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 use deskassistant_driver::epdimage::EpdImageFormat;
-use deskassistant_driver::{
-    EpdImage, EpdPage, HostMessage, UsbConnection, EPD_HEIGHT, EPD_WIDTH,
-    USB_HID_REPORT_ID3_LEN,
-};
+use deskassistant_driver::{EpdImage, EpdPage, HostMessage, UsbConnection, EPD_HEIGHT, EPD_WIDTH};
 
 #[derive(Debug, Clone, clap::Subcommand)]
 #[non_exhaustive]
@@ -41,18 +39,21 @@ fn main() -> anyhow::Result<()> {
     log::debug!("init");
 
     let cli = Cli::parse();
-    let connection = UsbConnection::init()?;
+    let mut connection = UsbConnection::new();
+    connection.open()?;
+
+    let timeout = Duration::from_millis(5_000);
 
     if let Some(command) = cli.command {
         match command {
             CliCommand::Status => {
-                connection.send_host_message(HostMessage::RequestDeviceStatus)?;
+                connection.send_host_message(HostMessage::RequestDeviceStatus, timeout)?;
 
-                let device_message = connection.read_device_message(5_000)?;
+                let device_message = connection.read_device_message(timeout)?;
                 println!("device message: {device_message:?}");
             }
             CliCommand::Switch { page } => {
-                connection.send_host_message(HostMessage::SwitchPage(page))?;
+                connection.send_host_message(HostMessage::SwitchPage(page), timeout)?;
             }
             CliCommand::SendImage { file } => {
                 if !file.exists() {
@@ -68,24 +69,13 @@ fn main() -> anyhow::Result<()> {
                 };
                 let image_bytes = EpdImage::load_from_file(&file)?.export(&format)?;
 
-                connection.send_host_message(HostMessage::UpdateUserImage { format })?;
+                connection.send_host_message(HostMessage::UpdateUserImage { format }, timeout)?;
+                connection.transmit_host_data(&image_bytes, timeout)?;
 
-                let byte_chunks = image_bytes.as_slice().chunks_exact(63);
-                for chunk in byte_chunks.clone() {
-                    connection
-                        .send_host_message(HostMessage::DataTransfer(chunk.try_into().unwrap()))?;
-                }
-
-                let mut remainding = byte_chunks.remainder().to_vec();
-                remainding.resize(USB_HID_REPORT_ID3_LEN - 1, 0x00);
-
-                connection
-                    .send_host_message(HostMessage::DataTransfer(remainding.try_into().unwrap()))?;
-
-                connection.send_host_message(HostMessage::UpdateUserImageComplete)?;
+                connection.send_host_message(HostMessage::UpdateUserImageComplete, timeout)?;
             }
             CliCommand::RefreshDisplay => {
-                connection.send_host_message(HostMessage::RefreshDisplay)?;
+                connection.send_host_message(HostMessage::RefreshDisplay, timeout)?;
             }
         }
     }

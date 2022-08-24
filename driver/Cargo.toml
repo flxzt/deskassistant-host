@@ -22,10 +22,6 @@ log = "0.4"
 thiserror = "1.0"
 anyhow = "1.0"
 rusb = "0.9"
-# configuring hidapi to use hidraw instead of libusb
-hidapi = {version = "1.4", default-features = false, features = ["linux-static-hidraw"] }
-# using libusb
-#hidapi = {version = "1.4" }
 image = "0.24"
 imageproc = "0.23"
 num-traits = "0.2"

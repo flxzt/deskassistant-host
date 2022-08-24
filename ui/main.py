@@ -9,9 +9,7 @@ if __name__ == "__main__":
     qt_app = QApplication(sys.argv)
     qt_app.setStyle("Fusion")
 
-    device_connection = PyUsbConnection.init()
-    #device_status = DeviceStatus(device_connection.retreive_device_status(2000))
-    #print(device_status.current_epd_page)
+    device_connection = PyUsbConnection.new()
 
     window = ui.AppWindow(device_connection)
     window.resize(800, 600)
