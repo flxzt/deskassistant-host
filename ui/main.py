@@ -1,5 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication, QStyle
+from PySide6.QtCore import QTimer, Qt
 
 from deskassistant_driver import PyUsbConnection, DeviceStatus
 
@@ -11,8 +12,8 @@ if __name__ == "__main__":
 
     device_connection = PyUsbConnection.new()
 
-    window = ui.AppWindow(device_connection)
-    window.resize(800, 600)
-    window.show()
+    app_window = ui.AppWindow(device_connection)
+    app_window.resize(800, 600)
+    app_window.show()
 
     sys.exit(qt_app.exec())

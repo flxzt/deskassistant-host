@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -77,7 +78,7 @@ impl PyUsbConnection {
         self.0.transmit_host_data(&image_bytes, timeout)?;
 
         self.0
-            .send_host_message(HostMessage::UpdateUserImageComplete, timeout)?;
+            .send_host_message(HostMessage::DataComplete, timeout)?;
 
         Ok(())
     }
@@ -87,5 +88,19 @@ impl PyUsbConnection {
             HostMessage::RefreshDisplay,
             Duration::from_millis(timeout_ms),
         )?)
+    }
+
+    pub fn report_active_app_name(&self, app_name: String, timeout_ms: u64) -> PyResult<()> {
+        let timeout = Duration::from_millis(timeout_ms);
+        let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
+        let str_len = app_name_cstr.len() as u16;
+
+        self.0
+            .send_host_message(HostMessage::ReportActiveApp { str_len }, timeout)?;
+        self.0.transmit_host_data(&app_name_cstr, timeout)?;
+        self.0
+            .send_host_message(HostMessage::DataComplete, timeout)?;
+
+        Ok(())
     }
 }

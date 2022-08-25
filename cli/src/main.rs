@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -24,6 +25,12 @@ enum CliCommand {
     /// Refresh the display
     #[clap(action)]
     RefreshDisplay,
+    /// Report an active app name
+    #[clap(action)]
+    ReportActiveApp {
+        #[clap(value_parser)]
+        app_name: String,
+    },
 }
 
 /// the cli for the deskassistant project
@@ -72,10 +79,18 @@ fn main() -> anyhow::Result<()> {
                 connection.send_host_message(HostMessage::UpdateUserImage { format }, timeout)?;
                 connection.transmit_host_data(&image_bytes, timeout)?;
 
-                connection.send_host_message(HostMessage::UpdateUserImageComplete, timeout)?;
+                connection.send_host_message(HostMessage::DataComplete, timeout)?;
             }
             CliCommand::RefreshDisplay => {
                 connection.send_host_message(HostMessage::RefreshDisplay, timeout)?;
+            }
+            CliCommand::ReportActiveApp { app_name } => {
+                let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
+                let str_len = app_name_cstr.len() as u16;
+
+                connection.send_host_message(HostMessage::ReportActiveApp { str_len }, timeout)?;
+                connection.transmit_host_data(&app_name_cstr, timeout)?;
+                connection.send_host_message(HostMessage::DataComplete, timeout)?;
             }
         }
     }

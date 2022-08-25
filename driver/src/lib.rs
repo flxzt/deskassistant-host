@@ -13,19 +13,14 @@ pub const USB_DEVICE_PID: u16 = 0x0456;
 
 pub const USB_HOST_MSG_LEN: usize = 64;
 pub const USB_DEVICE_MSG_LEN: usize = 64;
-pub const USB_HOST_DATA_LEN: usize = 64;
-pub const USB_DEVICE_DATA_LEN: usize = 64;
 
 pub const EPD_WIDTH: u32 = 400;
 pub const EPD_HEIGHT: u32 = 300;
 
 const EPNUM_HOST_MSG: u8 = 0x01;
 const EPNUM_DEVICE_MSG: u8 = 0x82;
-const EPNUM_HOST_DATA: u8 = 0x03;
-const EPNUM_DEVICE_DATA: u8 = 0x84;
 
-const ITF_NUM_HOST: u8 = 0;
-const ITF_NUM_DEVICE: u8 = 1;
+const ITF_NUM_MSG: u8 = 0;
 
 #[derive(
     Debug, Clone, Copy, clap::ValueEnum, num_derive::FromPrimitive, num_derive::ToPrimitive,
@@ -57,41 +52,56 @@ impl TryFrom<u8> for EpdPage {
 
 #[derive(Debug, Clone)]
 pub enum HostMessage {
+    Data { data: [u8; USB_HOST_MSG_LEN - 1] },
+    DataComplete,
     RequestDeviceStatus,
     SwitchPage(EpdPage),
     UpdateUserImage { format: epdimage::EpdImageFormat },
-    UpdateUserImageComplete,
     RefreshDisplay,
+    ReportActiveApp { str_len: u16 },
 }
 
 impl HostMessage {
     pub fn into_data(self) -> [u8; USB_HOST_MSG_LEN] {
-        let mut data: [u8; USB_HOST_MSG_LEN] = [0; USB_HOST_DATA_LEN];
+        let mut msg_data: [u8; USB_HOST_MSG_LEN] = [0; USB_HOST_MSG_LEN];
 
         match self {
+            HostMessage::Data { data } => {
+                msg_data[0] = 0x00; // Host message variant
+
+                // Copy the data into the msg
+                for (to, from) in msg_data.iter_mut().skip(1).zip(data.into_iter()) {
+                    *to = from;
+                }
+            }
+            HostMessage::DataComplete => {
+                msg_data[0] = 0x01; // Host message variant
+            }
             HostMessage::RequestDeviceStatus => {
-                data[0] = 0x00; // Host message variant
+                msg_data[0] = 0x02; // Host message variant
             }
             HostMessage::SwitchPage(page) => {
-                data[0] = 0x01; // Host message variant
-                data[1] = page.try_into().unwrap();
+                msg_data[0] = 0x03; // Host message variant
+                msg_data[1] = page.try_into().unwrap();
             }
             HostMessage::UpdateUserImage { format } => {
-                data[0] = 0x02; // Host message variant
-                data[1] = (format.width & 0xff) as u8;
-                data[2] = ((format.width >> 8) & 0xff) as u8;
-                data[3] = (format.height & 0xff) as u8;
-                data[4] = ((format.height >> 8) & 0xff) as u8;
-            }
-            HostMessage::UpdateUserImageComplete => {
-                data[0] = 0x03; // Host message variant
+                msg_data[0] = 0x04; // Host message variant
+                msg_data[1] = ((format.width >> 8) & 0xff) as u8;
+                msg_data[2] = (format.width & 0xff) as u8;
+                msg_data[3] = ((format.height >> 8) & 0xff) as u8;
+                msg_data[4] = (format.height & 0xff) as u8;
             }
             HostMessage::RefreshDisplay => {
-                data[0] = 0x04; // Host message variant
+                msg_data[0] = 0x05; // Host message variant
+            }
+            HostMessage::ReportActiveApp { str_len } => {
+                msg_data[0] = 0x06; // Host message variant
+                msg_data[1] = ((str_len >> 8) & 0xff) as u8;
+                msg_data[2] = (str_len & 0xff) as u8;
             }
         }
 
-        data
+        msg_data
     }
 }
 
@@ -139,7 +149,7 @@ impl UsbConnection {
 
         if self.device_handle.is_some() {
             // Already connected, early return
-            return Ok(())
+            return Ok(());
         }
 
         let mut device_h = rusb::open_device_with_vid_pid(vid, pid).ok_or_else(|| {
@@ -150,8 +160,7 @@ impl UsbConnection {
             )
         })?;
 
-        device_h.claim_interface(ITF_NUM_HOST)?;
-        device_h.claim_interface(ITF_NUM_DEVICE)?;
+        device_h.claim_interface(ITF_NUM_MSG)?;
 
         self.device_handle = Some(device_h);
 
@@ -184,25 +193,31 @@ impl UsbConnection {
     }
 
     pub fn transmit_host_data(&self, data: &[u8], timeout: Duration) -> anyhow::Result<()> {
-        let device_handle = self
-            .device_handle
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
+        let mut chunk_iter = data.chunks_exact(USB_HOST_MSG_LEN - 1);
+        for chunk in chunk_iter.by_ref() {
+            self.send_host_message(
+                HostMessage::Data {
+                    data: chunk[0..USB_HOST_MSG_LEN - 1].try_into().unwrap(),
+                },
+                timeout,
+            )?;
+        }
 
-        device_handle.write_bulk(EPNUM_HOST_DATA, data, timeout)?;
+        let mut remainder = chunk_iter.remainder().to_vec();
+        remainder.resize(USB_HOST_MSG_LEN - 1, 0x00);
+
+        self.send_host_message(
+            HostMessage::Data {
+                data: remainder.try_into().unwrap(),
+            },
+            timeout,
+        )?;
 
         Ok(())
     }
 
-    pub fn receive_device_data(&self, buf: &mut [u8], timeout: Duration) -> anyhow::Result<()> {
-        let device_handle = self
-            .device_handle
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no device opened"))?;
-
-        device_handle.read_bulk(EPNUM_DEVICE_DATA, buf, timeout)?;
-
-        Ok(())
+    pub fn receive_device_data(&self, _buf: &mut [u8], _timeout: Duration) -> anyhow::Result<()> {
+        todo!();
     }
 }
 

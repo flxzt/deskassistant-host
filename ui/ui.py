@@ -1,9 +1,11 @@
 from enum import Enum
-from PySide6.QtCore import Qt, Slot, Signal
+from PySide6.QtCore import Qt, Slot, Signal, QTimer
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 
 from deskassistant_driver import EpdPage
+
+import core
 
 app_name = "Deskassistant"
 
@@ -31,6 +33,8 @@ class AppWindow(QMainWindow):
         self.setWindowTitle(app_name)
         self.device_connection = device_connection
 
+        self.active_app_name = core.get_active_app_name()
+
         # Menu
         self.menu = self.menuBar()
         self.menu_general = self.menu.addMenu("General")
@@ -53,6 +57,12 @@ class AppWindow(QMainWindow):
         self.central_widget = AppCentralWidget(self)
         self.setCentralWidget(self.central_widget)
 
+        # Report active app timer
+        active_app_check = QTimer(self)
+        active_app_check.setInterval(500)
+        active_app_check.timeout.connect(self.report_active_app_exe_name)
+        active_app_check.start()
+
         self.open_device()
 
     @Slot()
@@ -66,6 +76,16 @@ class AppWindow(QMainWindow):
             self.status.showMessage("Connected successfully.", 2000)
             self.central_widget.connected_view.status_page.StatusRefresh()
             self.central_widget.set_view(1)
+
+    @Slot()
+    def report_active_app_exe_name(self):
+        if self.device_connection.opened():
+            active_app_name = core.get_active_app_name()
+            if self.active_app_name != active_app_name:
+                self.active_app_name = active_app_name
+                if self.active_app_name != None:
+                    self.device_connection.report_active_app_name(
+                        active_app_name, 5000)
 
 
 class AppCentralWidget(QWidget):
@@ -142,11 +162,15 @@ class DeviceControls(QGroupBox):
         self.disp_refresh_button.clicked.connect(self.DisplayRefresh)
 
         self.switch_page_container = QWidget()
-        self.switch_page_container.layout = QHBoxLayout(self.switch_page_container)
+        self.switch_page_container.layout = QHBoxLayout(
+            self.switch_page_container)
         self.switch_page_container.layout.addWidget(self.switch_page_label)
-        self.switch_page_container.layout.addWidget(self.switch_page_overview_button)
-        self.switch_page_container.layout.addWidget(self.switch_page_appscreen_button)
-        self.switch_page_container.layout.addWidget(self.switch_page_userimage_button)
+        self.switch_page_container.layout.addWidget(
+            self.switch_page_overview_button)
+        self.switch_page_container.layout.addWidget(
+            self.switch_page_appscreen_button)
+        self.switch_page_container.layout.addWidget(
+            self.switch_page_userimage_button)
 
         self.misc_container = QWidget()
         self.misc_container.layout = QHBoxLayout(self.misc_container)
@@ -167,6 +191,7 @@ class DeviceControls(QGroupBox):
         self.app_window.status.showMessage("Refresh display", 2000)
         self.app_window.device_connection.refresh_display(5000)
 
+
 class StatusPage(QWidget):
     def __init__(self, app_window: AppWindow):
         super().__init__()
@@ -180,13 +205,18 @@ class StatusPage(QWidget):
         self.status_refresh_button.clicked.connect(
             self.StatusRefresh)
 
-
         self.layout = QHBoxLayout(self)
         self.layout.addWidget(self.status_label,
                               alignment=(Qt.AlignLeft | Qt.AlignTop))
-        self.layout.addWidget(self.status_refresh_button, alignment=(Qt.AlignRight | Qt.AlignTop))
-        self.layout.setStretch(0, 10)
+        self.layout.addWidget(self.status_refresh_button,
+                              alignment=(Qt.AlignRight | Qt.AlignTop))
+        self.layout.setStretch(0, 1)
         self.layout.setStretch(1, 0)
+
+        status_refresh_timer = QTimer(self)
+        status_refresh_timer.setInterval(500)
+        status_refresh_timer.timeout.connect(self.StatusRefresh)
+        status_refresh_timer.start()
 
     @Slot()
     def StatusRefresh(self):
@@ -195,7 +225,7 @@ class StatusPage(QWidget):
 
         self.app_window.central_widget.connected_view.status_page.status_label.setText(f"""
 <h3>Device Status</h3><br>
-<b>Current Page:</b> {device_status.current_epd_page}
+<b>Current EPD Page:</b> {device_status.current_epd_page}<br>
         """)
 
         self.app_window.status.showMessage("Refresh Device status", 2000)
@@ -205,19 +235,49 @@ class EditPage(QWidget):
     def __init__(self, app_window: AppWindow):
         super().__init__()
         self.app_window = app_window
+        self.image_file: str | None = None
 
-        self.file_label = QLabel("Edit", alignment=Qt.AlignCenter)
-        self.import_file_dialog_button = QPushButton("Pick and send Image")
+        self.scene = QGraphicsScene()
+        self.pixmapitem = self.scene.addPixmap(QPixmap())
+        self.scene.setSceneRect(0, 0, 400, 300)
+
+        self.graphics_view = QGraphicsView(self.scene)
+
+        self.import_file_dialog_button = QPushButton("Import Image")
         self.import_file_dialog_button.clicked.connect(
             self.__onImportFileDialogButtonClicked)
 
+        self.send_image_button = QPushButton("Send")
+        self.send_image_button.clicked.connect(
+            self.SendImageFile)
+
+        self.edit_controls_container = QWidget()
+        self.edit_controls_container.layout = QHBoxLayout(
+            self.edit_controls_container)
+        self.edit_controls_container.layout.addWidget(
+            self.import_file_dialog_button)
+        self.edit_controls_container.layout.addWidget(self.send_image_button)
+
         self.layout = QVBoxLayout(self)
-        self.layout.addWidget(self.file_label)
-        self.layout.addWidget(self.import_file_dialog_button)
+        self.layout.addWidget(self.graphics_view,
+                              alignment=(Qt.AlignLeft | Qt.AlignTop))
+        self.layout.addWidget(self.edit_controls_container)
+        self.layout.setStretch(0, 1)
+        self.layout.setStretch(1, 0)
+
+    def __updateScenePixmap(self):
+        new_pixmap = QPixmap(self.image_file)
+        self.pixmapitem.setPixmap(new_pixmap)
+        self.scene.update()
+
 
     def __onImportFileDialogButtonClicked(self):
         file_path, filter = QFileDialog.getOpenFileName(
             parent=self, caption="Open file", dir=".", filter="(*.jpg *.png)")
-        self.file_label.setText(file_path)
+        self.image_file = file_path
+        self.__updateScenePixmap()
 
-        self.app_window.device_connection.send_image(file_path, 5000)
+    @Slot()
+    def SendImageFile(self):
+        if self.image_file != None:
+            self.app_window.device_connection.send_image(self.image_file, 5000)

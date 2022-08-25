@@ -34,10 +34,10 @@ impl EpdImage {
             .into_luma8();
 
         let bwimage = imageproc::contrast::threshold(&grayimage, 0x88).into_raw();
-        let px_chunks = bwimage.chunks_exact(8);
+        let mut px_chunks = bwimage.chunks_exact(8);
 
         // Pack the luma8 image (1byte per px) to one that only has one bit per pixel
-        for px_chunk in px_chunks {
+        for px_chunk in px_chunks.by_ref() {
             let px = px_chunk[0] & 0x01 << 7
                 | px_chunk[1] & 0x01 << 6
                 | px_chunk[2] & 0x01 << 5
@@ -47,10 +47,22 @@ impl EpdImage {
                 | px_chunk[6] & 0x01 << 1
                 | px_chunk[7] & 0x01;
 
-            data.push(px)
+            data.push(px);
         }
 
-        // TODO: include remainding chunk
+        let mut remainder_chunk = px_chunks.remainder().to_vec();
+        remainder_chunk.resize(8, 0x00);
+
+        let remainder_px = remainder_chunk[0] & 0x01 << 7
+            | remainder_chunk[1] & 0x01 << 6
+            | remainder_chunk[2] & 0x01 << 5
+            | remainder_chunk[3] & 0x01 << 4
+            | remainder_chunk[4] & 0x01 << 3
+            | remainder_chunk[5] & 0x01 << 2
+            | remainder_chunk[6] & 0x01 << 1
+            | remainder_chunk[7] & 0x01;
+
+        data.push(remainder_px);
 
         Ok(data)
     }
