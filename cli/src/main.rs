@@ -37,6 +37,8 @@ enum CliCommand {
 #[derive(Debug, Clone, Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
+    #[clap(short, long, value_parser)]
+    verbose: bool,
     #[clap(subcommand)]
     command: Option<CliCommand>,
 }
@@ -46,8 +48,13 @@ fn main() -> anyhow::Result<()> {
     log::debug!("init");
 
     let cli = Cli::parse();
-    let mut connection = UsbConnection::new();
-    connection.open()?;
+    let mut connection = UsbConnection::new()?;
+    // call handle events once to drive the hotplug callback
+    connection.handle_events()?;
+
+    if !connection.is_connected() {
+        return Err(anyhow::anyhow!("device is not connected. Try again."));
+    }
 
     let timeout = Duration::from_millis(5_000);
 

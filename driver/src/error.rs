@@ -1,6 +1,6 @@
 
 #[derive(Debug, thiserror::Error)]
-pub enum LibError {
+pub enum DriverError {
     #[error("Other error")]
     Other
 }

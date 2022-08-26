@@ -20,6 +20,16 @@ impl EpdImage {
         Ok(Self { image })
     }
 
+    /// Expects data in rgb8
+    pub fn load_from_data(width: u32, height: u32, data: Vec<u8>) -> anyhow::Result<Self> {
+        let image_buf: image::RgbImage = image::ImageBuffer::from_vec(width, height, data)
+            .ok_or_else(|| anyhow::anyhow!("failed to create rgb image from data."))?;
+
+        Ok(Self {
+            image: image::DynamicImage::from(image_buf),
+        })
+    }
+
     pub fn export(self, format: &EpdImageFormat) -> anyhow::Result<Vec<u8>> {
         let mut data = vec![];
 

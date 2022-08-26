@@ -1,9 +1,11 @@
 from enum import Enum
+from re import I
+from typing import List
 from PySide6.QtCore import Qt, Slot, Signal, QTimer
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 
-from deskassistant_driver import EpdPage
+from deskassistant_driver import EpdPage, PyUsbConnection, DeviceStatus
 
 import core
 
@@ -28,12 +30,13 @@ class ImportFileDialog(QDialog):
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, device_connection):
+    def __init__(self):
         super().__init__()
         self.setWindowTitle(app_name)
-        self.device_connection = device_connection
 
         self.active_app_name = core.get_active_app_name()
+
+        self.device_connection = PyUsbConnection.new()
 
         # Menu
         self.menu = self.menuBar()
@@ -46,7 +49,7 @@ class AppWindow(QMainWindow):
 
         # Connect action
         connect_action = QAction("Connect", self)
-        connect_action.triggered.connect(self.open_device)
+        connect_action.triggered.connect(self.connection_handle_events)
 
         self.menu_general.addAction(connect_action)
         self.menu_general.addAction(exit_action)
@@ -63,27 +66,29 @@ class AppWindow(QMainWindow):
         active_app_check.timeout.connect(self.report_active_app_exe_name)
         active_app_check.start()
 
-        self.open_device()
+        # Device connection event timer
+        device_connection_event_timer = QTimer(self)
+        device_connection_event_timer.setInterval(200)
+        device_connection_event_timer.timeout.connect(
+            self.connection_handle_events)
+        device_connection_event_timer.start()
 
     @Slot()
-    def open_device(self):
-        try:
-            self.device_connection.open()
-        except:
-            self.status.showMessage("Could not connect to device.", 2000)
-            self.central_widget.set_view(0)
-        else:
-            self.status.showMessage("Connected successfully.", 2000)
-            self.central_widget.connected_view.status_page.StatusRefresh()
+    def connection_handle_events(self):
+        self.device_connection.handle_events()
+
+        if self.device_connection.is_connected():
             self.central_widget.set_view(1)
+        else:
+            self.central_widget.set_view(0)
 
     @Slot()
     def report_active_app_exe_name(self):
-        if self.device_connection.opened():
-            active_app_name = core.get_active_app_name()
-            if self.active_app_name != active_app_name:
-                self.active_app_name = active_app_name
-                if self.active_app_name != None:
+        active_app_name = core.get_active_app_name()
+        if self.active_app_name != active_app_name:
+            self.active_app_name = active_app_name
+            if self.active_app_name != None:
+                if self.device_connection.is_connected():
                     self.device_connection.report_active_app_name(
                         active_app_name, 5000)
 
@@ -182,14 +187,17 @@ class DeviceControls(QGroupBox):
 
     @Slot()
     def SwitchPage(self, page: EpdPage):
-        self.app_window.status.showMessage(f"Switching to page {page}", 2000)
-        self.app_window.device_connection.switch_page(page, 5000)
-        self.app_window.central_widget.connected_view.status_page.StatusRefresh()
+        if self.app_window.device_connection.is_connected():
+            self.app_window.status.showMessage(
+                f"Switching to page {page}", 2000)
+            self.app_window.device_connection.switch_page(page, 5000)
+            self.app_window.central_widget.connected_view.status_page.StatusRefresh()
 
     @Slot()
     def DisplayRefresh(self):
-        self.app_window.status.showMessage("Refresh display", 2000)
-        self.app_window.device_connection.refresh_display(5000)
+        if self.app_window.device_connection.is_connected():
+            self.app_window.status.showMessage("Refresh display", 2000)
+            self.app_window.device_connection.refresh_display(5000)
 
 
 class StatusPage(QWidget):
@@ -220,15 +228,16 @@ class StatusPage(QWidget):
 
     @Slot()
     def StatusRefresh(self):
-        device_status = self.app_window.device_connection.retreive_device_status(
-            5000)
+        if self.app_window.device_connection.is_connected():
+            device_status = self.app_window.device_connection.retreive_device_status(
+                5000)
 
-        self.app_window.central_widget.connected_view.status_page.status_label.setText(f"""
+            self.app_window.central_widget.connected_view.status_page.status_label.setText(f"""
 <h3>Device Status</h3><br>
 <b>Current EPD Page:</b> {device_status.current_epd_page}<br>
-        """)
+            """)
 
-        self.app_window.status.showMessage("Refresh Device status", 2000)
+            self.app_window.status.showMessage("Refresh Device status", 2000)
 
 
 class EditPage(QWidget):
@@ -270,7 +279,6 @@ class EditPage(QWidget):
         self.pixmapitem.setPixmap(new_pixmap)
         self.scene.update()
 
-
     def __onImportFileDialogButtonClicked(self):
         file_path, filter = QFileDialog.getOpenFileName(
             parent=self, caption="Open file", dir=".", filter="(*.jpg *.png)")
@@ -278,6 +286,34 @@ class EditPage(QWidget):
         self.__updateScenePixmap()
 
     @Slot()
+    def SendScene(self):
+        pximage = QImage()
+        painter = QPainter(pximage)
+        self.scene.render(painter)
+        painter.end()
+
+        pximage.convertToFormat_inplace(
+            QImage.Format_RGB888, Qt.ImageConversionFlag.OrderedDither)
+        width = pximage.width()
+        height = pximage.height()
+        print(f"{width, height}")
+
+        data = bytearray()
+
+        for y in range(height):
+            for x in range(width):
+                pixel = pximage.pixelColor(x, y)
+                data.append(pixel.red)
+                data.append(pixel.green)
+                data.append(pixel.blue)
+
+        if self.app_window.device_connection.is_connected():
+            self.app_window.device_connection.convert_send_image_data(
+                width, height, data, 5000)
+
+    @Slot()
     def SendImageFile(self):
         if self.image_file != None:
-            self.app_window.device_connection.send_image(self.image_file, 5000)
+            if self.app_window.device_connection.is_connected():
+                self.app_window.device_connection.convert_send_image_file(
+                    self.image_file, 5000)

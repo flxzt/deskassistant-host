@@ -25,16 +25,16 @@ pub struct PyUsbConnection(UsbConnection);
 #[pymethods]
 impl PyUsbConnection {
     #[staticmethod]
-    pub fn new() -> Self {
-        Self(UsbConnection::new())
+    pub fn new() -> PyResult<Self> {
+        Ok(Self(UsbConnection::new()?))
     }
 
-    pub fn open(&mut self) -> PyResult<()> {
-        Ok(self.0.open()?)
+    pub fn handle_events(&mut self) -> PyResult<()> {
+        Ok(self.0.handle_events()?)
     }
 
-    pub fn opened(&self) -> bool {
-        self.0.device_handle.is_some()
+    pub fn is_connected(&self) -> bool {
+        self.0.is_connected()
     }
 
     pub fn retreive_device_status(&self, timeout_ms: u64) -> PyResult<DeviceStatus> {
@@ -57,7 +57,33 @@ impl PyUsbConnection {
         )?)
     }
 
-    pub fn send_image(&self, image_file: PathBuf, timeout_ms: u64) -> PyResult<()> {
+    pub fn convert_send_image_data(
+        &self,
+        width: u32,
+        height: u32,
+        image_data: Vec<u8>,
+        timeout_ms: u64,
+    ) -> PyResult<()> {
+        let timeout = Duration::from_millis(timeout_ms);
+
+        let epd_format = EpdImageFormat {
+            width: EPD_WIDTH,
+            height: EPD_HEIGHT,
+        };
+        let image_bytes =
+            EpdImage::load_from_data(width, height, image_data)?.export(&epd_format)?;
+
+        self.0
+            .send_host_message(HostMessage::UpdateUserImage { format: epd_format }, timeout)?;
+        self.0.transmit_host_data(&image_bytes, timeout)?;
+
+        self.0
+            .send_host_message(HostMessage::DataComplete, timeout)?;
+
+        Ok(())
+    }
+
+    pub fn convert_send_image_file(&self, image_file: PathBuf, timeout_ms: u64) -> PyResult<()> {
         let timeout = Duration::from_millis(timeout_ms);
 
         if !image_file.exists() {
@@ -67,14 +93,14 @@ impl PyUsbConnection {
             ))?;
         }
 
-        let format = EpdImageFormat {
+        let epd_format = EpdImageFormat {
             width: EPD_WIDTH,
             height: EPD_HEIGHT,
         };
-        let image_bytes = EpdImage::load_from_file(&image_file)?.export(&format)?;
+        let image_bytes = EpdImage::load_from_file(&image_file)?.export(&epd_format)?;
 
         self.0
-            .send_host_message(HostMessage::UpdateUserImage { format }, timeout)?;
+            .send_host_message(HostMessage::UpdateUserImage { format: epd_format }, timeout)?;
         self.0.transmit_host_data(&image_bytes, timeout)?;
 
         self.0
