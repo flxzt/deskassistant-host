@@ -1,0 +1,4 @@
+{
+    "python.defaultInterpreterPath": "/mnt/Daten/Projekte/deskassistant/deskassistant-host/.env/bin/python3.10",
+    "python.formatting.provider": "black"
+}

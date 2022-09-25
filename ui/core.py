@@ -3,6 +3,7 @@ import sys
 import proc.core
 from xdo import Xdo
 
+
 def get_active_app_name() -> (str | None):
     match sys.platform:
         case "linux":
