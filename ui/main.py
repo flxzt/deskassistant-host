@@ -9,7 +9,7 @@ if __name__ == "__main__":
     qt_app.setStyle("Fusion")
 
     app_window = ui.AppWindow()
-    app_window.resize(800, 600)
+    app_window.resize(800, 800)
     app_window.show()
 
     sys.exit(qt_app.exec())

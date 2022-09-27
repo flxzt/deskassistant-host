@@ -1,3 +1,5 @@
+import os
+
 from enum import Enum
 from re import I
 from typing import List
@@ -80,7 +82,10 @@ class AppWindow(QMainWindow):
         active_app_name = core.get_active_app_name()
         if self.active_app_name != active_app_name:
             self.active_app_name = active_app_name
+
             if self.active_app_name != None:
+                self.central_widget.status_widget.UpdateAppStatus()
+
                 if self.device_connection.is_connected():
                     self.device_connection.report_active_app_name(active_app_name, 5000)
 
@@ -93,17 +98,42 @@ class AppCentralWidget(QWidget):
         self.disconnected_view = AppDisconnectedView(app_window)
         self.connected_view = AppConnectedView(app_window)
 
+        self.status_widget = HostStatusWidget(app_window)
+
         self.stack = QStackedWidget()
         self.stack.addWidget(self.disconnected_view)
         self.stack.addWidget(self.connected_view)
 
         self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.status_widget)
         self.layout.addWidget(self.stack)
 
         self.set_view(1)
 
     def set_view(self, index):
         self.stack.setCurrentIndex(index)
+
+
+class HostStatusWidget(QGroupBox):
+    def __init__(self, app_window: AppWindow):
+        super().__init__()
+
+        self.setTitle("Host Status")
+
+        self.app_window = app_window
+        self.active_app_label = QLabel(self.app_window.active_app_name)
+
+        self.active_app_container = QWidget()
+        self.active_app_container.layout = QHBoxLayout(self.active_app_container)
+        self.active_app_container.layout.addWidget(QLabel("active app:"))
+        self.active_app_container.layout.addWidget(self.active_app_label)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.active_app_container)
+
+    @Slot()
+    def UpdateAppStatus(self):
+        self.active_app_label.setText(self.app_window.active_app_name)
 
 
 class AppDisconnectedView(QWidget):
@@ -244,18 +274,26 @@ class EditPage(QWidget):
 
         self.graphics_view = QGraphicsView(self.scene)
 
-        self.import_file_dialog_button = QPushButton("Import Image")
-        self.import_file_dialog_button.clicked.connect(
+        self.pick_image_dialog_button = QPushButton("Pick Image")
+        self.pick_image_dialog_button.clicked.connect(
             self.__onImportFileDialogButtonClicked
         )
 
-        self.send_image_button = QPushButton("Send")
-        self.send_image_button.clicked.connect(self.SendImageFile)
+        self.send_user_image_button = QPushButton("Send as User Image")
+        self.send_user_image_button.clicked.connect(self.SendUserImageFile)
+
+        self.app_image_name_edit = QLineEdit()
+        self.app_image_name_edit.setPlaceholderText("App name for image")
+
+        self.send_app_image_button = QPushButton("Send as App Image")
+        self.send_app_image_button.clicked.connect(self.SendAppImageFile)
 
         self.edit_controls_container = QWidget()
         self.edit_controls_container.layout = QHBoxLayout(self.edit_controls_container)
-        self.edit_controls_container.layout.addWidget(self.import_file_dialog_button)
-        self.edit_controls_container.layout.addWidget(self.send_image_button)
+        self.edit_controls_container.layout.addWidget(self.pick_image_dialog_button)
+        self.edit_controls_container.layout.addWidget(self.send_user_image_button)
+        self.edit_controls_container.layout.addWidget(self.app_image_name_edit)
+        self.edit_controls_container.layout.addWidget(self.send_app_image_button)
 
         self.layout = QVBoxLayout(self)
         self.layout.addWidget(
@@ -275,40 +313,22 @@ class EditPage(QWidget):
             parent=self, caption="Open file", dir=".", filter="(*.jpg *.png)"
         )
         self.image_file = file_path
+        self.app_image_name_edit.clear()
+        self.app_image_name_edit.insert(os.path.splitext(os.path.basename(file_path))[0])
         self.__updateScenePixmap()
 
     @Slot()
-    def SendScene(self):
-        pximage = QImage()
-        painter = QPainter(pximage)
-        self.scene.render(painter)
-        painter.end()
-
-        pximage.convertToFormat_inplace(
-            QImage.Format_RGB888, Qt.ImageConversionFlag.OrderedDither
-        )
-        width = pximage.width()
-        height = pximage.height()
-        print(f"{width, height}")
-
-        data = bytearray()
-
-        for y in range(height):
-            for x in range(width):
-                pixel = pximage.pixelColor(x, y)
-                data.append(pixel.red)
-                data.append(pixel.green)
-                data.append(pixel.blue)
-
-        if self.app_window.device_connection.is_connected():
-            self.app_window.device_connection.convert_send_image_data(
-                width, height, data, 5000
-            )
-
-    @Slot()
-    def SendImageFile(self):
+    def SendUserImageFile(self):
         if self.image_file != None:
             if self.app_window.device_connection.is_connected():
-                self.app_window.device_connection.convert_send_image_file(
+                self.app_window.device_connection.convert_send_user_image_from_file(
                     self.image_file, 5000
+                )
+
+    @Slot()
+    def SendAppImageFile(self):
+        if self.image_file != None:
+            if self.app_window.device_connection.is_connected():
+                self.app_window.device_connection.convert_send_app_image_from_file(
+                    self.app_image_name_edit.text(), self.image_file, 5000
                 )
