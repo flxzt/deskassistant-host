@@ -1,14 +1,9 @@
-use std::ffi::CString;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use pyo3::prelude::*;
 
-use crate::epdimage::EpdImageFormat;
-use crate::{
-    DeviceMessage, DeviceStatus, EpdImage, EpdPage, HostMessage, UsbConnection, EPD_HEIGHT,
-    EPD_WIDTH,
-};
+use crate::{actions, DeviceStatus, EpdPage, UsbConnection};
 
 #[pymodule]
 fn deskassistant_driver(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
@@ -38,28 +33,23 @@ impl PyUsbConnection {
     }
 
     pub fn retreive_device_status(&self, timeout_ms: u64) -> PyResult<DeviceStatus> {
-        self.0.send_host_message(
-            HostMessage::RequestDeviceStatus,
+        Ok(actions::retreive_device_status(
+            &self.0,
             Duration::from_millis(timeout_ms),
-        )?;
-        match self
-            .0
-            .read_device_message(Duration::from_millis(timeout_ms))?
-        {
-            DeviceMessage::DeviceStatus(status) => Ok(status),
-        }
+        )?)
     }
 
     pub fn refresh_display(&self, timeout_ms: u64) -> PyResult<()> {
-        Ok(self.0.send_host_message(
-            HostMessage::RefreshDisplay,
+        Ok(actions::refresh_display(
+            &self.0,
             Duration::from_millis(timeout_ms),
         )?)
     }
 
     pub fn switch_page(&self, page: EpdPage, timeout_ms: u64) -> PyResult<()> {
-        Ok(self.0.send_host_message(
-            HostMessage::SwitchPage(page),
+        Ok(actions::switch_page(
+            &self.0,
+            page,
             Duration::from_millis(timeout_ms),
         )?)
     }
@@ -69,87 +59,39 @@ impl PyUsbConnection {
         image_file: PathBuf,
         timeout_ms: u64,
     ) -> PyResult<()> {
-        let timeout = Duration::from_millis(timeout_ms);
-
-        if !image_file.exists() {
-            Err(anyhow::anyhow!(
-                "`{}` does not exist. Exiting",
-                image_file.display()
-            ))?;
-        }
-
-        let epd_format = EpdImageFormat {
-            width: EPD_WIDTH,
-            height: EPD_HEIGHT,
-        };
-        let image_bytes = EpdImage::load_from_file(&image_file)?.export(&epd_format)?;
-
-        self.0
-            .send_host_message(HostMessage::UpdateUserImage { format: epd_format }, timeout)?;
-        self.0.transmit_host_data(&image_bytes, timeout)?;
-
-        self.0
-            .send_host_message(HostMessage::DataComplete, timeout)?;
-
-        Ok(())
+        Ok(actions::update_user_image_from_file(
+            &self.0,
+            image_file,
+            Duration::from_millis(timeout_ms),
+        )?)
     }
 
     pub fn convert_send_app_image_from_file(
         &self,
-        app_name: &str,
+        app_name: String,
         image_file: PathBuf,
         timeout_ms: u64,
     ) -> PyResult<()> {
-        let timeout = Duration::from_millis(timeout_ms);
-
-        let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
-        let str_len = app_name_cstr.len() as u16;
-
-        if !image_file.exists() {
-            Err(anyhow::anyhow!(
-                "`{}` does not exist. Exiting",
-                image_file.display()
-            ))?;
-        }
-
-        let epd_format = EpdImageFormat {
-            width: EPD_WIDTH,
-            height: EPD_HEIGHT,
-        };
-        let image_bytes = EpdImage::load_from_file(&image_file)?.export(&epd_format)?;
-
-        self.0.send_host_message(
-            HostMessage::UpdateAppImage {
-                app_name_str_len: str_len,
-                format: epd_format,
-            },
-            timeout,
-        )?;
-
-        // First send the app name string
-        self.0.transmit_host_data(&app_name_cstr, timeout)?;
-        self.0
-            .send_host_message(HostMessage::DataComplete, timeout)?;
-
-        // Then the app image data
-        self.0.transmit_host_data(&image_bytes, timeout)?;
-        self.0
-            .send_host_message(HostMessage::DataComplete, timeout)?;
-
-        Ok(())
+        Ok(actions::update_app_image_from_file(
+            &self.0,
+            app_name,
+            image_file,
+            Duration::from_millis(timeout_ms),
+        )?)
     }
 
     pub fn report_active_app_name(&self, app_name: String, timeout_ms: u64) -> PyResult<()> {
-        let timeout = Duration::from_millis(timeout_ms);
-        let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
-        let str_len = app_name_cstr.len() as u16;
+        Ok(actions::report_active_app(
+            &self.0,
+            app_name,
+            Duration::from_millis(timeout_ms),
+        )?)
+    }
 
-        self.0
-            .send_host_message(HostMessage::ReportActiveApp { str_len }, timeout)?;
-        self.0.transmit_host_data(&app_name_cstr, timeout)?;
-        self.0
-            .send_host_message(HostMessage::DataComplete, timeout)?;
-
-        Ok(())
+    pub fn retreive_app_images_list(&self, timeout_ms: u64) -> PyResult<Vec<String>> {
+        Ok(actions::retreive_app_images_list(
+            &self.0,
+            Duration::from_millis(timeout_ms),
+        )?)
     }
 }

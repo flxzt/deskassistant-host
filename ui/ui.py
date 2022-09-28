@@ -252,11 +252,22 @@ class StatusPage(QWidget):
                 5000
             )
 
-            self.app_window.central_widget.connected_view.status_page.status_label.setText(
-                f"""
+            status_text = f"""
 <h3>Device Status</h3><br>
 <b>Current EPD Page:</b> {device_status.current_epd_page}<br>
-            """
+"""
+
+            app_images_list = (
+                self.app_window.device_connection.retreive_app_images_list(5000)
+           )
+
+            status_text += "<h3>App Images:</h3><br>"
+
+            for app_image_entry in app_images_list:
+                status_text += f"{app_image_entry}<br>"
+
+            self.app_window.central_widget.connected_view.status_page.status_label.setText(
+                status_text
             )
 
             self.app_window.status.showMessage("Refresh Device status", 2000)
@@ -314,7 +325,9 @@ class EditPage(QWidget):
         )
         self.image_file = file_path
         self.app_image_name_edit.clear()
-        self.app_image_name_edit.insert(os.path.splitext(os.path.basename(file_path))[0])
+        self.app_image_name_edit.insert(
+            os.path.splitext(os.path.basename(file_path))[0]
+        )
         self.__updateScenePixmap()
 
     @Slot()

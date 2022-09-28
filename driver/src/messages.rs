@@ -3,14 +3,24 @@ use crate::{DeviceStatus, EpdImageFormat, EpdPage};
 
 #[derive(Debug, Clone)]
 pub enum HostMessage {
-    Data { data: [u8; USB_HOST_MSG_LEN - 1] },
+    Data {
+        data: [u8; USB_HOST_MSG_LEN - 1],
+    },
     DataComplete,
     RequestDeviceStatus,
     RefreshDisplay,
     SwitchPage(EpdPage),
-    UpdateUserImage { format: EpdImageFormat },
-    UpdateAppImage { app_name_str_len: u16, format: EpdImageFormat },
-    ReportActiveApp { str_len: u16 },
+    UpdateUserImage {
+        format: EpdImageFormat,
+    },
+    UpdateAppImage {
+        app_name_str_len: u16,
+        format: EpdImageFormat,
+    },
+    ReportActiveApp {
+        str_len: u16,
+    },
+    RequestListAppImages,
 }
 
 impl HostMessage {
@@ -46,7 +56,10 @@ impl HostMessage {
                 msg_data[3] = ((format.height >> 8) & 0xff) as u8;
                 msg_data[4] = (format.height & 0xff) as u8;
             }
-            HostMessage::UpdateAppImage { app_name_str_len, format } => {
+            HostMessage::UpdateAppImage {
+                app_name_str_len,
+                format,
+            } => {
                 msg_data[0] = 0x06; // Host message variant
                 msg_data[1] = ((format.width >> 8) & 0xff) as u8;
                 msg_data[2] = (format.width & 0xff) as u8;
@@ -60,6 +73,9 @@ impl HostMessage {
                 msg_data[1] = ((str_len >> 8) & 0xff) as u8;
                 msg_data[2] = (str_len & 0xff) as u8;
             }
+            HostMessage::RequestListAppImages => {
+                msg_data[0] = 0x08; // Host message variant
+            }
         }
 
         msg_data
@@ -68,17 +84,28 @@ impl HostMessage {
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeviceMessage {
+    Data { data: [u8; USB_HOST_MSG_LEN - 1] },
+    DataComplete,
     DeviceStatus(DeviceStatus),
+    ListAppImages { str_len: u16 },
 }
 
 impl DeviceMessage {
     pub fn from_data(data: &[u8; USB_DEVICE_MSG_LEN]) -> anyhow::Result<Self> {
         match data[0] {
-            0x00 => Ok(Self::DeviceStatus(DeviceStatus {
+            0x00 => Ok(Self::Data {
+                data: data[1..USB_DEVICE_MSG_LEN].try_into().unwrap(),
+            }),
+            0x01 => Ok(Self::DataComplete),
+            0x02 => Ok(Self::DeviceStatus(DeviceStatus {
                 current_epd_page: EpdPage::try_from(data[1])?,
             })),
-            _ => Err(anyhow::anyhow!(
-                "Could not extract DeviceMessage from data, invalid message variant"
+            0x03 => Ok(Self::ListAppImages {
+                str_len: (data[1] as u16) << 8 | data[2] as u16,
+            }),
+            variant => Err(anyhow::anyhow!(
+                "Could not extract DeviceMessage from data, invalid message variant: `{}`",
+                variant
             )),
         }
     }

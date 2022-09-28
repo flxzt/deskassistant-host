@@ -1,6 +1,7 @@
 pub mod connection;
 pub mod epdimage;
 pub mod messages;
+pub mod actions;
 pub mod pybindings;
 
 // Re-Exports

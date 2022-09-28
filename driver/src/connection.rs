@@ -134,22 +134,7 @@ impl UsbConnection {
         Ok(())
     }
 
-    /// Reads a message from the device.
-    /// Blocks until finished
-    pub fn read_device_message(&self, timeout: Duration) -> anyhow::Result<DeviceMessage> {
-        let mut data = [0_u8; USB_HOST_MSG_LEN];
-
-        let device_handle = self
-            .device_handle
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Device not connected."))?;
-
-        device_handle.read_bulk(EPNUM_DEVICE_MSG, &mut data, timeout)?;
-
-        DeviceMessage::from_data(&data)
-    }
-
-    /// Transmits the entire slice to the device with Data messages.
+    /// Transmits the entire slice to the device with data messages.
     /// Blocks until finished
     pub fn transmit_host_data(&self, data: &[u8], timeout: Duration) -> anyhow::Result<()> {
         let mut chunk_iter = data.chunks_exact(USB_HOST_MSG_LEN - 1);
@@ -175,10 +160,57 @@ impl UsbConnection {
         Ok(())
     }
 
-    /// Reads data from the device until the buf is filled.
+    /// Reads a message from the device.
     /// Blocks until finished
-    pub fn receive_device_data(&self, _buf: &mut [u8], _timeout: Duration) -> anyhow::Result<()> {
-        todo!();
+    pub fn read_device_message(&self, timeout: Duration) -> anyhow::Result<DeviceMessage> {
+        let mut data = [0_u8; USB_HOST_MSG_LEN];
+
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Device not connected."))?;
+
+        device_handle.read_bulk(EPNUM_DEVICE_MSG, &mut data, timeout)?;
+
+        let device_message = DeviceMessage::from_data(&data)?;
+
+        log::debug!("received device message: `{device_message:?}`");
+
+        Ok(device_message)
+    }
+
+    /// Reads data from the device until a DataComplete Message or the optionally specified number of messages are received.
+    /// Blocks until finished
+    pub fn receive_device_data(&self, timeout: Duration, msg_cnt: Option<usize>) -> anyhow::Result<Vec<u8>> {
+        let mut accumulated_data = vec![];
+
+        let device_handle = self
+            .device_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Device not connected."))?;
+
+        let msg_cnt = msg_cnt.unwrap_or(usize::MAX);
+
+        for _ in 0..msg_cnt {
+            let mut data = [0_u8; USB_HOST_MSG_LEN];
+            device_handle.read_bulk(EPNUM_DEVICE_MSG, &mut data, timeout)?;
+
+            let device_message = DeviceMessage::from_data(&data)?;
+            log::debug!("received device data: `{device_message:02x?}`");
+
+            match device_message {
+                DeviceMessage::Data { data } => accumulated_data.append(&mut data.to_vec()),
+                DeviceMessage::DataComplete => break,
+                msg => {
+                    return Err(anyhow::anyhow!(
+                        "received unexpected device message `{:?}`",
+                        msg
+                    ))
+                }
+            }
+        }
+
+        Ok(accumulated_data)
     }
 }
 
