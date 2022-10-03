@@ -3,7 +3,7 @@ import os
 from enum import Enum
 from re import I
 from typing import List
-from PySide6.QtCore import Qt, Slot, Signal, QTimer
+from PySide6.QtCore import Qt, Slot, Signal, QTimer, QMargins
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 
@@ -253,15 +253,15 @@ class StatusPage(QWidget):
             )
 
             status_text = f"""
-<h3>Device Status</h3><br>
+<h3>Device Status</h3>
 <b>Current EPD Page:</b> {device_status.current_epd_page}<br>
 """
 
             app_images_list = (
                 self.app_window.device_connection.retreive_app_images_list(5000)
-           )
+            )
 
-            status_text += "<h3>App Images:</h3><br>"
+            status_text += "<b>App Images:</b><br>"
 
             for app_image_entry in app_images_list:
                 status_text += f"{app_image_entry}<br>"
@@ -295,24 +295,31 @@ class EditPage(QWidget):
 
         self.app_image_name_edit = QLineEdit()
         self.app_image_name_edit.setPlaceholderText("App name for image")
+        self.app_image_name_edit.setContentsMargins(QMargins(30, 0, 0, 0))
 
         self.send_app_image_button = QPushButton("Send as App Image")
         self.send_app_image_button.clicked.connect(self.SendAppImageFile)
 
         self.edit_controls_container = QWidget()
         self.edit_controls_container.layout = QHBoxLayout(self.edit_controls_container)
-        self.edit_controls_container.layout.addWidget(self.pick_image_dialog_button)
         self.edit_controls_container.layout.addWidget(self.send_user_image_button)
         self.edit_controls_container.layout.addWidget(self.app_image_name_edit)
         self.edit_controls_container.layout.addWidget(self.send_app_image_button)
+        self.edit_controls_container.layout.setStretch(0, 0)
+        self.edit_controls_container.layout.setStretch(1, 1)
+        self.edit_controls_container.layout.setStretch(2, 0)
 
         self.layout = QVBoxLayout(self)
+        self.layout.addWidget(
+            self.pick_image_dialog_button, alignment=(Qt.AlignLeft | Qt.AlignTop)
+        )
         self.layout.addWidget(
             self.graphics_view, alignment=(Qt.AlignCenter | Qt.AlignTop)
         )
         self.layout.addWidget(self.edit_controls_container)
-        self.layout.setStretch(0, 1)
-        self.layout.setStretch(1, 0)
+        self.layout.setStretch(0, 0)
+        self.layout.setStretch(1, 1)
+        self.layout.setStretch(2, 0)
 
     def __updateScenePixmap(self):
         new_pixmap = QPixmap(self.image_file)

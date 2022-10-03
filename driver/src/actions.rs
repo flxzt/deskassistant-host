@@ -81,7 +81,7 @@ pub fn update_app_image_from_file(
     let image_bytes = EpdImage::load_from_file(&img_file)?.export(&format)?;
 
     let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
-    let str_len = app_name_cstr.len() as u16;
+    let str_len = (app_name_cstr.len() as u16).saturating_sub(1);
 
     connection.send_host_message(
         HostMessage::UpdateAppImage {
@@ -108,7 +108,7 @@ pub fn report_active_app(
     timeout: Duration,
 ) -> anyhow::Result<()> {
     let app_name_cstr = CString::new(app_name)?.into_bytes_with_nul();
-    let str_len = app_name_cstr.len() as u16;
+    let str_len = (app_name_cstr.len() as u16).saturating_sub(1);
 
     connection.send_host_message(HostMessage::ReportActiveApp { str_len }, timeout)?;
     connection.transmit_host_data(&app_name_cstr, timeout)?;
