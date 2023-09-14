@@ -13,7 +13,7 @@ pip install python-libxdo proc
 # Setup
 Bindings are generated with the `pyo3` crate and the `maturin` tool.
 
-We use a virtual env to install packages.
+A virtual env is used to install packages.
 
 ```bash
 python3.10 -m venv .env
