@@ -1,6 +1,37 @@
-## UI
+# Deskassistant
 
-Using Python 3.10, which can be installed on fedora (and some other dependencies):
+## Client
+
+The client is a STM32-F4 MCU (STM32-F446-RE). Connected to it are:
+- waveshare EPD module (through SPI)
+- a separate USB-C port
+- mSD port (for storing data and configuration permanently)
+
+The client is able to a display a custom user image that is sent to it.
+It displays different custom images for active apps that are reported to it.
+All images are saved permanently on the mSD.
+It is able to store/load settings to/from a JSON file on the mSD.
+In order to communicate with the host it implements a custom USB device class.
+The firmware utilizes the [fatFS](http://elm-chan.org/fsw/ff/00index_e.html), [parson](https://github.com/kgabis/parson) and [tinyusb](https://github.com/hathach/tinyusb) libraries.
+
+## Host
+
+The host application for the deskassistant project. It consists of:
+- The backend, written in Rust, that communicates with the client through a custom USB device class.
+- A UI written with Python and QT, interfacing with the Rust backend through [py03](https://crates.io/crates/pyo3).
+- A CLI written in Rust
+
+## UI/CLI Capabilities
+
+- Refresh Display - refreshes the EPP
+- Read Status - Read the status of the client
+- Switch Page - Switches through the different pages
+- Update User Image - send/update the user image through USB
+- Report active app - the host automatically reports the current active (focused) app on the host to the client
+
+## Dependencies
+
+System dependencies:
 ```bash
 sudo dnf install python3.10 patchelf
 ```
@@ -36,7 +67,8 @@ maturin init
 ```
 
 ## Regenerate Bindings
-to generate and install the bindings in the venv, run
+
+To generate and install the bindings in the `venv`, run
 ```bash
 maturin develop
 ```
